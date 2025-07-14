@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    # 仅当标题以 build 开头（不区分大小写）
+    # 仅在标题以 build 开头时运行
     if: startsWith(github.event.issue.title, 'build')
     runs-on: windows-latest
 
@@ -24,28 +24,46 @@ jobs:
           "@
           $body | Out-File -FilePath "${{ github.workspace }}\config.xml" -Encoding utf8NoBOM
 
-      # 3. 运行 setup.exe /download config.xml
+      # 3. 下载 7zr（7-Zip 轻量命令行版）
+      - name: Download 7zr
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://www.7-zip.org/a/7zr.exe" -OutFile ".\7zr.exe"
+
+      # 4. 运行 setup.exe /download config.xml
       - name: Download Office
         shell: cmd
         run: |
           .\setup.exe /download config.xml
 
-      # 4. 打包 Office 文件夹、setup.exe、config.xml 为 pack.7z
-      - name: Create pack.7z
+      # 5. 使用 7zr 打包 Office 文件夹、setup.exe、config.xml 为 pack.7z
+      - name: Create pack.7z with 7zr
         shell: cmd
         run: |
-          7z a -t7z pack.7z Office setup.exe config.xml
+          .\7zr a -t7z pack.7z Office setup.exe config.xml
 
-      # 5. 用 copy /b 合并 7zsd.sfx + config.txt + pack.7z -> inst.exe
+      # 6. 用 copy /b 合并 7zsd.sfx + config.txt + pack.7z -> inst.exe
       - name: Build inst.exe
         shell: cmd
         run: |
           copy /b 7zsd.sfx + config.txt + pack.7z inst.exe
 
-      # 6. 上传工件（保留 1 天）
+      # 7. 上传工件（保留 1 天）
       - name: Upload inst.exe
         uses: actions/upload-artifact@v4
         with:
           name: inst
           path: inst.exe
           retention-days: 1
+
+      # 8. 自动关闭触发本次构建的 Issue
+      - name: Close issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });
