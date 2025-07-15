@@ -59,78 +59,67 @@ jobs:
       # 8. 自动关闭触发本次构建的 Issue
       - name: Generate random filename
         id: name
-        run: echo "fname=inst-$(date +%s%N | sha256sum | head -c 8).exe" >> "$GITHUB_OUTPUT"
+        shell: pwsh
+        run: |
+          $rand = [System.IO.Path]::GetRandomFileName().Replace(".", "")
+          $fname = "inst_$rand.exe"
+          "fname=$fname" >> $env:GITHUB_OUTPUT
 
-      - name: Upload to 123云盘
+      - name: Upload inst.exe to 123云盘
         id: upload
+        shell: pwsh
         env:
           TOKEN: ${{ secrets.ACCESS_TOKEN }}
           FNAME: ${{ steps.name.outputs.fname }}
         run: |
-          # 1. 创建文件（获取 preuploadID）
-          RESP=$(curl -s https://open-api.123pan.com/upload/v1/file/create \
-            -H 'Platform: open_platform' \
-            -H 'Content-Type: application/json' \
-            -H "Authorization: Bearer $TOKEN" \
-            -d "{
-                  \"parentFileID\": 0,
-                  \"filename\": \"$FNAME\",
-                  \"etag\": \"$(md5sum inst.exe | cut -d' ' -f1)\",
-                  \"size\": $(stat -c%s inst.exe)
-                }")
-          PRE_ID=$(echo "$RESP" | jq -r '.data.preuploadID')
-          echo "preuploadID=$PRE_ID" >> $GITHUB_OUTPUT
+          # 1. 计算文件 MD5 和大小
+          $etag = (Get-FileHash -Algorithm MD5 -Path "inst.exe").Hash.ToLower()
+          $size = (Get-Item "inst.exe").Length
 
-          # 2. 获取上传地址
-          UP_URL=$(curl -s https://open-api.123pan.com/upload/v1/file/get_upload_url \
-            -H 'Platform: open_platform' \
-            -H 'Content-Type: application/json' \
-            -H "Authorization: Bearer $TOKEN" \
-            -d "{
-                  \"preuploadID\": \"$PRE_ID\",
-                  \"sliceNo\": 1
-                }" | jq -r '.data.uploadUrl')
+          # 2. 创建文件（获取 preuploadID）
+          $body = @{ parentFileID=0; filename=$env:FNAME; etag=$etag; size=$size } | ConvertTo-Json
+          $resp = Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v1/file/create" `
+            -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
+            -ContentType "application/json" -Body $body
+          $preID = $resp.data.preuploadID
+          "preuploadID=$preID" >> $env:GITHUB_OUTPUT
 
-          # 3. 实际上传文件
-          curl -T inst.exe "$UP_URL"
+          # 3. 获取上传地址
+          $urlResp = Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v1/file/get_upload_url" `
+            -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
+            -ContentType "application/json" -Body (@{ preuploadID=$preID; sliceNo=1 } | ConvertTo-Json)
+          $uploadUrl = $urlResp.data.uploadUrl
 
-          # 4. 上传完成
-          curl -s https://open-api.123pan.com/upload/v2/file/upload_complete \
-            -H 'Platform: open_platform' \
-            -H "Authorization: Bearer $TOKEN" \
-            -d "{\"preuploadID\":\"$PRE_ID\"}"
+          # 4. 实际上传
+          Invoke-RestMethod -Uri $uploadUrl -Method Put -InFile "inst.exe" -ContentType "application/octet-stream"
 
-          # 5. 获取 fileID
-          FILE_ID=$(curl -s https://open-api.123pan.com/upload/v1/file/create \
-            -H 'Platform: open_platform' \
-            -H 'Content-Type: application/json' \
-            -H "Authorization: Bearer $TOKEN" \
-            -d "{
-                  \"parentFileID\": 0,
-                  \"filename\": \"$FNAME\",
-                  \"etag\": \"$(md5sum inst.exe | cut -d' ' -f1)\",
-                  \"size\": $(stat -c%s inst.exe)
-                }" | jq -r '.data.fileID')
-          echo "fileID=$FILE_ID" >> $GITHUB_OUTPUT
+          # 5. 上传完成
+          Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v2/file/upload_complete" `
+            -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
+            -ContentType "application/json" -Body (@{ preuploadID=$preID } | ConvertTo-Json)
+
+          # 6. 再次创建文件获取 fileID
+          $resp2 = Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v1/file/create" `
+            -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
+            -ContentType "application/json" -Body $body
+          $fileID = $resp2.data.fileID
+          "fileID=$fileID" >> $env:GITHUB_OUTPUT
 
       - name: Create share link
         id: share
+        shell: pwsh
         env:
           TOKEN: ${{ secrets.ACCESS_TOKEN }}
           FILE_ID: ${{ steps.upload.outputs.fileID }}
           FNAME: ${{ steps.name.outputs.fname }}
         run: |
-          RESP=$(curl -s https://open-api.123pan.com/api/v1/share/create \
-            -H 'Platform: open_platform' \
-            -H 'Content-Type: application/json' \
-            -H "Authorization: Bearer $TOKEN" \
-            -d "{
-                  \"shareName\": \"$FNAME\",
-                  \"shareExpire\": 0,
-                  \"fileIDList\": \"$FILE_ID\"
-                }")
-          LINK="https://www.123pan.com/s/$(echo "$RESP" | jq -r '.data.shareKey')"
-          echo "link=$LINK" >> $GITHUB_OUTPUT
+          $body = @{ shareName=$env:FNAME; shareExpire=0; fileIDList=$env:FILE_ID } | ConvertTo-Json
+          $resp = Invoke-RestMethod -Uri "https://open-api.123pan.com/api/v1/share/create" `
+            -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
+            -ContentType "application/json" -Body $body
+          $shareKey = $resp.data.shareKey
+          $link = "https://www.123pan.com/s/$shareKey"
+          "link=$link" >> $env:GITHUB_OUTPUT
 
       - name: Comment link on issue
         uses: actions/github-script@v7
@@ -140,5 +129,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `✅ 构建完成！📦 文件名：${{ steps.name.outputs.fname }}🔗 下载：${{ steps.share.outputs.link }}`
+              body: `✅ 构建完成！\n📦 文件名：${{ steps.name.outputs.fname }}\n🔗 下载：${{ steps.share.outputs.link }}`
             });
