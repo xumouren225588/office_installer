@@ -48,20 +48,40 @@ jobs:
         run: |
           copy /b 7zsd.sfx + config.txt + pack.7z inst.exe
 
-      # 7. 上传工件（保留 1 天）
-      - name: Upload inst.exe
-        uses: actions/upload-artifact@v4
-        with:
-          name: inst
-          path: inst.exe
-          retention-days: 1
+      - name: Generate release tag
+        id: rel
+        shell: pwsh
+        run: |
+          $tag = "v$(Get-Date -Format 'yyyy.MM.dd-HHmmss')"
+          echo "TAG=$tag" >> $env:GITHUB_OUTPUT
 
-      # 8. 自动关闭触发本次构建的 Issue
-      - name: Close issue
+      # 8. 创建正式 Release
+      - name: Create release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.rel.outputs.TAG }}
+          name: Office Installer ${{ steps.rel.outputs.TAG }}
+          body: |
+            自动构建，触发 Issue #${{ github.event.issue.number }}
+          files: inst.exe
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 9. 在 Issue 追加评论并关闭
+      - name: Comment and close
         uses: actions/github-script@v7
         with:
           script: |
-            github.rest.issues.update({
+            const releaseUrl = '${{ steps.create_release.outputs.url }}';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `✅ 构建完成，下载地址：${releaseUrl}`
+            });
+            await github.rest.issues.update({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
