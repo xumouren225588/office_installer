@@ -70,7 +70,7 @@ jobs:
             -H "Authorization: Bearer %API_TOKEN%" ^
             -H "Platform: open_platform" ^
             -H "Content-Type: application/json" ^
-            -d "{^"url^":^"https://%NIGHTLY_LINK%^", ^"dirID^": %FOLDER_ID%}"
+            -d '{"url":"https://%NIGHTLY_LINK%", "dirID": %FOLDER_ID%}'
 
       - name: Close issue
         uses: actions/github-script@v7
