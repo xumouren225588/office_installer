@@ -57,87 +57,13 @@ jobs:
           retention-days: 1
 
       # 8. 自动关闭触发本次构建的 Issue
-      - name: Generate random filename
-        id: name
-        shell: pwsh
-        run: |
-          $rand = [System.IO.Path]::GetRandomFileName().Replace(".", "")
-          $fname = "inst_$rand.exe"
-          "fname=$fname" >> $env:GITHUB_OUTPUT
-
-      - name: Upload inst.exe to 123云盘
-        id: upload
-        shell: pwsh
-        env:
-          TOKEN: ${{ secrets.ACCESS_TOKEN }}
-          FNAME: ${{ steps.name.outputs.fname }}
-        run: |
-          # 1. MD5 & Size
-          $etag  = (Get-FileHash -Algorithm MD5 -Path "inst.exe").Hash.ToLower()
-          $size  = (Get-Item "inst.exe").Length
-
-          # 2. 创建文件
-          $body  = @{ parentFileID=0; filename=$env:FNAME; etag=$etag; size=$size } | ConvertTo-Json
-          $resp  = Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v1/file/create" `
-                      -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
-                      -ContentType "application/json" -Body $body
-          $preID = $resp.data.preuploadID
-
-          # 3. 获取上传地址（关键修复）
-          $urlResp = Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v1/file/get_upload_url" `
-                       -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
-                       -ContentType "application/json" `
-                       -Body (@{ preuploadID=$preID; sliceNo=1 } | ConvertTo-Json)
-          $uploadUrl = [System.Net.WebUtility]::UrlDecode($urlResp.data.presignedURL)
-          if ([string]::IsNullOrEmpty($uploadUrl)) {
-            throw "获取上传地址失败，返回: $($urlResp | ConvertTo-Json -Depth 10)"
-          }
-
-          # 4. PUT 上传
-          try {
-            Invoke-RestMethod -Uri $uploadUrl -Method Put -InFile "inst.exe" -ContentType "application/octet-stream"
-          } catch {
-            throw "上传文件失败，错误: $_"
-          }
-
-          # 5. 上传完成
-          Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v2/file/upload_complete" `
-            -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
-            -ContentType "application/json" `
-            -Body (@{ preuploadID=$preID } | ConvertTo-Json)
-
-          # 6. 再次创建文件拿 fileID
-          $resp2  = Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v1/file/create" `
-                       -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
-                       -ContentType "application/json" -Body $body
-          $fileID = $resp2.data.fileID
-
-          # 输出
-          "fileID=$fileID" >> $env:GITHUB_OUTPUT
-
-      - name: Create share link
-        id: share
-        shell: pwsh
-        env:
-          TOKEN: ${{ secrets.ACCESS_TOKEN }}
-          FILE_ID: ${{ steps.upload.outputs.fileID }}
-          FNAME: ${{ steps.name.outputs.fname }}
-        run: |
-          $body = @{ shareName=$env:FNAME; shareExpire=0; fileIDList=$env:FILE_ID } | ConvertTo-Json
-          $resp = Invoke-RestMethod -Uri "https://open-api.123pan.com/api/v1/share/create" `
-            -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
-            -ContentType "application/json" -Body $body
-          $shareKey = $resp.data.shareKey
-          $link = "https://www.123pan.com/s/$shareKey"
-          "link=$link" >> $env:GITHUB_OUTPUT
-
-      - name: Comment link on issue
+      - name: Close issue
         uses: actions/github-script@v7
         with:
           script: |
-            github.rest.issues.createComment({
+            github.rest.issues.update({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `✅ 构建完成！\n📦 文件名：${{ steps.name.outputs.fname }}\n🔗 下载：${{ steps.share.outputs.link }}`
+              state: 'closed'
             });
