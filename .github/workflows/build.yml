@@ -88,7 +88,7 @@ jobs:
                        -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
                        -ContentType "application/json" `
                        -Body (@{ preuploadID=$preID; sliceNo=1 } | ConvertTo-Json)
-          $uploadUrl = [System.Net.WebUtility]::UrlDecode($urlResp.data.uploadUrl)
+          $uploadUrl = [System.Net.WebUtility]::UrlDecode($urlResp.data.presignedURL)
           if ([string]::IsNullOrEmpty($uploadUrl)) {
             throw "获取上传地址失败，返回: $($urlResp | ConvertTo-Json -Depth 10)"
           }
