@@ -68,6 +68,7 @@ jobs:
           # 调用123云盘API创建离线下载任务（参考文档：https://123yunpan.yuque.com/org-wiki-123yunpan-muaork/cr6ced/he47hsq2o1xvgado）
           curl -X POST "https://open-api.123pan.com/api/v1/offline/download" ^
             -H "Authorization: Bearer %API_TOKEN%" ^
+            -H "Platform: open_platform"
             -H "Content-Type: application/json" ^
             -d "{\"url\":\"https://%NIGHTLY_LINK%\", \"folder_id\": %FOLDER_ID%}"
 
