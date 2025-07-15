@@ -57,13 +57,88 @@ jobs:
           retention-days: 1
 
       # 8. 自动关闭触发本次构建的 Issue
-      - name: Close issue
+      - name: Generate random filename
+        id: name
+        run: echo "fname=inst-$(date +%s%N | sha256sum | head -c 8).exe" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to 123云盘
+        id: upload
+        env:
+          TOKEN: ${{ secrets.ACCESS_TOKEN }}
+          FNAME: ${{ steps.name.outputs.fname }}
+        run: |
+          # 1. 创建文件（获取 preuploadID）
+          RESP=$(curl -s https://open-api.123pan.com/upload/v1/file/create \
+            -H 'Platform: open_platform' \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer $TOKEN" \
+            -d "{
+                  \"parentFileID\": 0,
+                  \"filename\": \"$FNAME\",
+                  \"etag\": \"$(md5sum inst.exe | cut -d' ' -f1)\",
+                  \"size\": $(stat -c%s inst.exe)
+                }")
+          PRE_ID=$(echo "$RESP" | jq -r '.data.preuploadID')
+          echo "preuploadID=$PRE_ID" >> $GITHUB_OUTPUT
+
+          # 2. 获取上传地址
+          UP_URL=$(curl -s https://open-api.123pan.com/upload/v1/file/get_upload_url \
+            -H 'Platform: open_platform' \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer $TOKEN" \
+            -d "{
+                  \"preuploadID\": \"$PRE_ID\",
+                  \"sliceNo\": 1
+                }" | jq -r '.data.uploadUrl')
+
+          # 3. 实际上传文件
+          curl -T inst.exe "$UP_URL"
+
+          # 4. 上传完成
+          curl -s https://open-api.123pan.com/upload/v2/file/upload_complete \
+            -H 'Platform: open_platform' \
+            -H "Authorization: Bearer $TOKEN" \
+            -d "{\"preuploadID\":\"$PRE_ID\"}"
+
+          # 5. 获取 fileID
+          FILE_ID=$(curl -s https://open-api.123pan.com/upload/v1/file/create \
+            -H 'Platform: open_platform' \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer $TOKEN" \
+            -d "{
+                  \"parentFileID\": 0,
+                  \"filename\": \"$FNAME\",
+                  \"etag\": \"$(md5sum inst.exe | cut -d' ' -f1)\",
+                  \"size\": $(stat -c%s inst.exe)
+                }" | jq -r '.data.fileID')
+          echo "fileID=$FILE_ID" >> $GITHUB_OUTPUT
+
+      - name: Create share link
+        id: share
+        env:
+          TOKEN: ${{ secrets.ACCESS_TOKEN }}
+          FILE_ID: ${{ steps.upload.outputs.fileID }}
+          FNAME: ${{ steps.name.outputs.fname }}
+        run: |
+          RESP=$(curl -s https://open-api.123pan.com/api/v1/share/create \
+            -H 'Platform: open_platform' \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer $TOKEN" \
+            -d "{
+                  \"shareName\": \"$FNAME\",
+                  \"shareExpire\": 0,
+                  \"fileIDList\": \"$FILE_ID\"
+                }")
+          LINK="https://www.123pan.com/s/$(echo "$RESP" | jq -r '.data.shareKey')"
+          echo "link=$LINK" >> $GITHUB_OUTPUT
+
+      - name: Comment link on issue
         uses: actions/github-script@v7
         with:
           script: |
-            github.rest.issues.update({
+            github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              state: 'closed'
+              body: `✅ 构建完成！📦 文件名：${{ steps.name.outputs.fname }}🔗 下载：${{ steps.share.outputs.link }}`
             });
