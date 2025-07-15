@@ -88,13 +88,17 @@ jobs:
                        -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
                        -ContentType "application/json" `
                        -Body (@{ preuploadID=$preID; sliceNo=1 } | ConvertTo-Json)
-          $uploadUrl = $urlResp.data.uploadUrl
+          $uploadUrl = [System.Net.WebUtility]::UrlDecode($urlResp.data.uploadUrl)
           if ([string]::IsNullOrEmpty($uploadUrl)) {
             throw "获取上传地址失败，返回: $($urlResp | ConvertTo-Json -Depth 10)"
           }
 
           # 4. PUT 上传
-          Invoke-RestMethod -Uri $uploadUrl -Method Put -InFile "inst.exe" -ContentType "application/octet-stream"
+          try {
+            Invoke-RestMethod -Uri $uploadUrl -Method Put -InFile "inst.exe" -ContentType "application/octet-stream"
+          } catch {
+            throw "上传文件失败，错误: $_"
+          }
 
           # 5. 上传完成
           Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v2/file/upload_complete" `
