@@ -72,37 +72,43 @@ jobs:
           TOKEN: ${{ secrets.ACCESS_TOKEN }}
           FNAME: ${{ steps.name.outputs.fname }}
         run: |
-          # 1. 计算文件 MD5 和大小
-          $etag = (Get-FileHash -Algorithm MD5 -Path "inst.exe").Hash.ToLower()
-          $size = (Get-Item "inst.exe").Length
+          # 1. MD5 & Size
+          $etag  = (Get-FileHash -Algorithm MD5 -Path "inst.exe").Hash.ToLower()
+          $size  = (Get-Item "inst.exe").Length
 
-          # 2. 创建文件（获取 preuploadID）
-          $body = @{ parentFileID=0; filename=$env:FNAME; etag=$etag; size=$size } | ConvertTo-Json
-          $resp = Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v1/file/create" `
-            -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
-            -ContentType "application/json" -Body $body
+          # 2. 创建文件
+          $body  = @{ parentFileID=0; filename=$env:FNAME; etag=$etag; size=$size } | ConvertTo-Json
+          $resp  = Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v1/file/create" `
+                      -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
+                      -ContentType "application/json" -Body $body
           $preID = $resp.data.preuploadID
-          "preuploadID=$preID" >> $env:GITHUB_OUTPUT
 
-          # 3. 获取上传地址
+          # 3. 获取上传地址（关键修复）
           $urlResp = Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v1/file/get_upload_url" `
-            -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
-            -ContentType "application/json" -Body (@{ preuploadID=$preID; sliceNo=1 } | ConvertTo-Json)
+                       -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
+                       -ContentType "application/json" `
+                       -Body (@{ preuploadID=$preID; sliceNo=1 } | ConvertTo-Json)
           $uploadUrl = $urlResp.data.uploadUrl
+          if ([string]::IsNullOrEmpty($uploadUrl)) {
+            throw "获取上传地址失败，返回: $($urlResp | ConvertTo-Json -Depth 10)"
+          }
 
-          # 4. 实际上传
+          # 4. PUT 上传
           Invoke-RestMethod -Uri $uploadUrl -Method Put -InFile "inst.exe" -ContentType "application/octet-stream"
 
           # 5. 上传完成
           Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v2/file/upload_complete" `
             -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
-            -ContentType "application/json" -Body (@{ preuploadID=$preID } | ConvertTo-Json)
+            -ContentType "application/json" `
+            -Body (@{ preuploadID=$preID } | ConvertTo-Json)
 
-          # 6. 再次创建文件获取 fileID
-          $resp2 = Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v1/file/create" `
-            -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
-            -ContentType "application/json" -Body $body
+          # 6. 再次创建文件拿 fileID
+          $resp2  = Invoke-RestMethod -Uri "https://open-api.123pan.com/upload/v1/file/create" `
+                       -Method Post -Headers @{ "Platform"="open_platform"; "Authorization"="Bearer $env:TOKEN" } `
+                       -ContentType "application/json" -Body $body
           $fileID = $resp2.data.fileID
+
+          # 输出
           "fileID=$fileID" >> $env:GITHUB_OUTPUT
 
       - name: Create share link
