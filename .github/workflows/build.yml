@@ -52,25 +52,29 @@ jobs:
       - name: Generate nightly.link and create download task
         shell: cmd
         env:
-          # 替换为你的123云盘API密钥（建议通过GitHub Secrets存储）
           API_TOKEN: ${{ secrets.ACCESS_TOKEN }}
-          # 工件ID从上传步骤的输出获取
           ARTIFACT_ID: ${{ steps.upload-artifact.outputs.artifact-id }}
-          # 你的GitHub用户名和仓库名
           GITHUB_USER: xumouren225588
           GITHUB_REPO: office_installer
-          # 目标文件夹ID
           FOLDER_ID: 19960178
+          # 把 issue 标题传进来
+          ISSUE_TITLE: ${{ github.event.issue.title }}
         run: |
-          # 生成nightly.link链接
           set NIGHTLY_LINK=nightly.link/%GITHUB_USER%/%GITHUB_REPO%/actions/artifacts/%ARTIFACT_ID%.zip
-          
-          # 调用123云盘API创建离线下载任务（参考文档：https://123yunpan.yuque.com/org-wiki-123yunpan-muaork/cr6ced/he47hsq2o1xvgado）
+
+          rem 去掉开头的“build ”（含空格），再把剩余空格替换成下划线
+          set "RAW=%ISSUE_TITLE%"
+          set "RAW=!RAW:~6!"
+          set "RAW=!RAW: =_!"
+
+          rem 拼出最终文件名
+          set "FILE_NAME=!RAW!_%ARTIFACT_ID%.zip"
+
           curl -X POST "https://open-api.123pan.com/api/v1/offline/download" ^
             -H "Authorization: Bearer %API_TOKEN%" ^
             -H "Platform: open_platform" ^
             -H "Content-Type: application/json" ^
-            --data "{\"url\":\"https://%NIGHTLY_LINK%\", \"dirID\": %FOLDER_ID%, \"fileName\":\"%ARTIFACT_ID%.zip\"}"
+            --data "{\"url\":\"https://%NIGHTLY_LINK%\", \"dirID\": %FOLDER_ID%, \"fileName\":\"!FILE_NAME!\"}"
 
       - name: Close issue
         uses: actions/github-script@v7
