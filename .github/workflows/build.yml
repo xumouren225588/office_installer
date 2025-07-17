@@ -60,6 +60,7 @@ jobs:
           # 把 issue 标题传进来
           ISSUE_TITLE: ${{ github.event.issue.title }}
         run: |
+          setlocal enabledelayedexpansion
           set NIGHTLY_LINK=nightly.link/%GITHUB_USER%/%GITHUB_REPO%/actions/artifacts/%ARTIFACT_ID%.zip
 
           rem 去掉开头的“build ”（含空格），再把剩余空格替换成下划线
