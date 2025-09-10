@@ -13,16 +13,46 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
-
-	"github.com/ktr0731/evans"
 )
 
-func downloadFile(url string, dest string) error {{
-	// 创建进度条
-	bar := evans.New()
-	bar.Start()
+// 手动实现下载进度条
+func printDownloadProgress(current, total int64) {{
+	if total <= 0 {{
+		return
+	}}
 
+	// 计算百分比
+	percent := float64(current) / float64(total) * 100
+
+	// 进度条长度
+	barLength := 50
+	filledLength := int(percent / 100 * float64(barLength))
+	
+	// 构建进度条字符串
+	bar := strings.Repeat("=", filledLength) + strings.Repeat(" ", barLength-filledLength)
+	
+	// 格式化显示 (KB/MB)
+	var currentStr, totalStr string
+	if total < 1024*1024 {{
+		currentStr = fmt.Sprintf("%.1fKB", float64(current)/1024)
+		totalStr = fmt.Sprintf("%.1fKB", float64(total)/1024)
+	}} else {{
+		currentStr = fmt.Sprintf("%.1fMB", float64(current)/1024/1024)
+		totalStr = fmt.Sprintf("%.1fMB", float64(total)/1024/1024)
+	}}
+
+	
+	fmt.Printf("\\rDownloading: [%-50s] %.1f%% %s/%s", bar, percent, currentStr, totalStr)
+	
+	// 下载完成时换行
+	if current >= total {{
+		fmt.Println()
+	}}
+}}
+
+func downloadFile(url string, dest string) error {{
 	// 发起 HTTP 请求
 	resp, err := http.Get(url)
 	if err != nil {{
@@ -32,7 +62,9 @@ func downloadFile(url string, dest string) error {{
 
 	// 获取文件大小
 	total := resp.ContentLength
-	bar.SetTotal(int64(total))
+	if total <= 0 {{
+		fmt.Println("无法获取文件大小")
+	}}
 
 	// 创建目标文件
 	file, err := os.Create(dest)
@@ -41,17 +73,43 @@ func downloadFile(url string, dest string) error {{
 	}}
 	defer file.Close()
 
-	// 复制文件内容
-	n, err := io.Copy(io.MultiWriter(file, bar), resp.Body)
-	if err != nil {{
-		return err
+	// 用于计算下载进度
+	var downloaded int64
+	buffer := make([]byte, 4096)
+	lastPrintTime := time.Now()
+	
+	for {{
+		// 读取数据
+		n, err := resp.Body.Read(buffer)
+		if n > 0 {{
+			// 写入文件
+			if _, writeErr := file.Write(buffer[:n]); writeErr != nil {{
+				return writeErr
+			}}
+			
+			downloaded += int64(n)
+			
+			// 限制打印频率，避免频繁输出
+			if time.Since(lastPrintTime) > 100*time.Millisecond || downloaded >= total {{
+				printDownloadProgress(downloaded, total)
+				lastPrintTime = time.Now()
+			}}
+		}}
+		
+		if err != nil {{
+			if err == io.EOF {{
+				break
+			}}
+			return err
+		}}
 	}}
-	bar.Incr(int64(n))
-	bar.Finish()
 
+	// 确保最后打印一次完整进度
+	printDownloadProgress(downloaded, total)
 	return nil
 }}
 
+// 手动实现解压进度条
 func unzipFile(zipPath, dest string) error {{
 	// 打开压缩包
 	r, err := zip.OpenReader(zipPath)
@@ -60,6 +118,10 @@ func unzipFile(zipPath, dest string) error {{
 	}}
 	defer r.Close()
 
+	// 获取总文件数用于进度计算
+	totalFiles := len(r.File)
+	processedFiles := 0
+
 	// 创建解压目录
 	if err := os.MkdirAll(dest, 0755); err != nil {{
 		return err
@@ -67,33 +129,56 @@ func unzipFile(zipPath, dest string) error {{
 
 	// 解压文件
 	for _, f := range r.File {{
+		processedFiles++
+		
+		// 打印解压进度
+		percent := float64(processedFiles) / float64(totalFiles) * 100
+		fmt.Printf("\\rUnzipping: %.1f%% (%d/%d) - %s", 
+			percent, processedFiles, totalFiles, f.Name)
+
 		// 创建文件路径
 		fpath := filepath.Join(dest, f.Name)
+		
+		// 处理目录
+		if f.FileInfo().IsDir() {{
+			if err := os.MkdirAll(fpath, f.Mode()); err != nil {{
+				return err
+			}}
+			continue
+		}}
+
+		// 创建父目录
 		if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {{
 			return err
 		}}
 
-		// 打开文件
+		// 打开压缩包内的文件
 		rc, err := f.Open()
 		if err != nil {{
 			return err
 		}}
-		defer rc.Close()
-
+		
 		// 创建目标文件
-		outFile, err := os.Create(fpath)
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
 		if err != nil {{
+			rc.Close()
 			return err
 		}}
-		defer outFile.Close()
 
 		// 复制文件内容
 		_, err = io.Copy(outFile, rc)
+		
+		// 确保关闭文件
+		outFile.Close()
+		rc.Close()
+		
 		if err != nil {{
 			return err
 		}}
 	}}
 
+	// 解压完成换行
+	fmt.Println()
 	return nil
 }}
 
@@ -105,50 +190,51 @@ func main() {{
 
 	// 创建临时目录
 	if err := os.MkdirAll(tempDir, 0755); err != nil {{
-		fmt.Printf("Error creating temp directory: %v\\n", err)
+		fmt.Printf("创建临时目录失败: %v\\n", err)
 		return
 	}}
 
 	// 下载文件
-	fmt.Println("Downloading file...")
+	fmt.Println("开始下载文件...")
 	if err := downloadFile(url, zipPath); err != nil {{
-		fmt.Printf("Error downloading file: %v\\n", err)
+		fmt.Printf("下载文件失败: %v\\n", err)
 		return
 	}}
 
 	// 解压文件
-	fmt.Println("Unzipping file...")
+	fmt.Println("开始解压文件...")
 	if err := unzipFile(zipPath, tempDir); err != nil {{
-		fmt.Printf("Error unzipping file: %v\\n", err)
+		fmt.Printf("解压文件失败: %v\\n", err)
 		return
 	}}
 
 	// 删除压缩包
 	if err := os.Remove(zipPath); err != nil {{
-		fmt.Printf("Error removing zip file: %v\\n", err)
+		fmt.Printf("删除压缩包失败: %v\\n", err)
 		return
 	}}
-    os.Chdir(tempDir)
-	// 拼接解压目录和 setup.exe 的路径
+	
+	os.Chdir(tempDir)
+	// 拼接 setup.exe 路径
 	setupPath := filepath.Join(tempDir, "setup.exe")
 
 	// 检查 setup.exe 是否存在
 	if _, err := os.Stat(setupPath); os.IsNotExist(err) {{
-		fmt.Printf("setup.exe not found in the extracted directory: %v\\n", err)
+		fmt.Printf("在解压目录中未找到 setup.exe: %v\\n", err)
 		return
 	}}
 
 	// 运行 setup.exe
-	fmt.Println("Installing...")
+	fmt.Println("开始安装...")
 	cmd := exec.Command(setupPath, "/configure", "config.xml")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {{
-		fmt.Printf("Error running setup.exe: %v\\n", err)
+		fmt.Printf("运行 setup.exe 失败: %v\\n", err)
 		return
 	}}
 
-	fmt.Println("Setup completed successfully!")
+	fmt.Println("安装完成!")
 }}
         """)
     
