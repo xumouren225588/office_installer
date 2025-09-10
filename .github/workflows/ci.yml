@@ -1,0 +1,20 @@
+name: Upload Artifact Example
+
+on: [push]  # 触发条件，这里以push事件为例
+
+jobs:
+  build:
+    runs-on: windows-latest  # 指定运行环境
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Upload Artifact 1 # 上传工件
+      uses: actions/upload-artifact@v4  # 使用upload-artifact Action
+      with:
+        name: my-artifact1  # 工件名称
+        path: test  # 要上传的文件路径
+    - name: Upload Artifact 2  # 上传工件
+      uses: actions/upload-artifact@v4  # 使用upload-artifact Action
+      with:
+        name: my-artifact2  # 工件名称
+        path: test\*  # 要上传的文件路径
