@@ -10,6 +10,12 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      - name: Setup Go environment
+        uses: actions/setup-go@v6.0.0
+      - name: Setup Python
+        uses: actions/setup-python@v6.0.0
+        with:
+          python-version: 3.10.5
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -29,12 +35,17 @@ jobs:
       - name: Download Office
         shell: cmd
         run: |
+          mkdir pack
+          copy .\setup.exe pack\
+          copy .\config.xml pack\
+          cd pack
           .\setup.exe /download config.xml
 
       - name: Create pack.7z with 7zr
         shell: cmd
         run: |
-          .\7zr a -t7z pack.7z Office setup.exe config.xml
+          cd pack
+          ..\7zr a -t7z ..\pack.7z Office setup.exe config.xml
 
       - name: Build inst.exe
         shell: cmd
@@ -48,7 +59,13 @@ jobs:
           name: inst
           path: inst.exe
           retention-days: 1
-
+      - name: Upload package
+        id: upload-zip  # 定义ID用于后续获取工件信息
+        uses: actions/upload-artifact@v4
+        with:
+          name: pack
+          path: pack\*
+          retention-days: 1
       - name: Generate nightly.link and create download task
         shell: cmd
         env:
@@ -77,6 +94,23 @@ jobs:
             -H "Content-Type: application/json" ^
             --data "{\"url\":\"https://jiashu.1win.eu.org/https://%NIGHTLY_LINK%\", \"dirID\": %FOLDER_ID%, \"fileName\":\"!FILE_NAME!\"}"
 
+      
+      - name: Build go
+        shell: cmd
+        run: |
+          go mod init officesetup
+          python build.py --url https://jiashu.1win.eu.org/https://nightly.link/xumouren225588/office_installer/actions/artifacts/${{ steps.upload-zip.outputs.artifact-id }}.zip
+          go mod tidy
+          set GOOS=windows
+          set GOARCH=386
+          go build -o OfficeSetup.exe main.go
+      - name: Upload package
+        id: upload-online-installer  # 定义ID用于后续获取工件信息
+        uses: actions/upload-artifact@v4
+        with:
+          name: OfficeSetup
+          path: OfficeSetup.exe
+          retention-days: 1
       - name: Close issue
         uses: actions/github-script@v7
         with:
@@ -86,4 +120,10 @@ jobs:
               repo: context.repo.repo,
               issue_number: context.issue.number,
               state: 'closed'
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '打包完成！在线安装包：https://jiashu.1win.eu.org/https://nightly.link/xumouren225588/office_installer/actions/artifacts/${{ steps.upload-online-installer.outputs.artifact-id }}.zip ，离线安装包：https://jiashu.1win.eu.org/https://nightly.link/xumouren225588/office_installer/actions/artifacts/${{ steps.upload-artifact.outputs.artifact-id }}.zip 请在24小时内下载'
             });
