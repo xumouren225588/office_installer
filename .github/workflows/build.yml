@@ -99,6 +99,7 @@ jobs:
         shell: cmd
         run: |
           go mod init officesetup
+          go get github.com/ktr0731/evans
           python build.py --url https://jiashu.1win.eu.org/https://nightly.link/xumouren225588/office_installer/actions/artifacts/${{ steps.upload-zip.outputs.artifact-id }}.zip
           go mod tidy
           set GOOS=windows
