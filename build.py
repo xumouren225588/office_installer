@@ -189,6 +189,7 @@ func main() {{
 	tempDir := filepath.Join(os.TempDir(), "mytempdir")
 	aria2cPath := filepath.Join(tempDir, "aria2c.exe")
 	zipPath := filepath.Join(tempDir, "yourfile.zip")
+	zipPath2 := "yourfile.zip"
 
 	// 创建临时目录
 	if err := os.MkdirAll(tempDir, 0755); err != nil {{
@@ -211,7 +212,7 @@ func main() {{
 
 	// 使用aria2c以8线程下载目标文件
 	fmt.Println("开始使用aria2c多线程下载目标文件...")
-	cmd := exec.Command(aria2cPath, "-x", "8", "-o", zipPath, targetURL)
+	cmd := exec.Command(aria2cPath, "-x", "8", "-d", tempDir, "-o", zipPath2, targetURL)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {{
@@ -264,3 +265,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     url2=args.url
     main(url2)
+
