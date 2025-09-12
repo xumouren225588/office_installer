@@ -20,15 +20,18 @@ import (
 )
 
 const (
-	chunkSize = 256 * 1024 * 1024 // 256MB 每块
+	chunkSize  = 256 * 1024 * 1024 // 256MB 每块
+	maxRetries = 3                 // 最大重试次数
+	retryDelay = 5 * time.Second   // 重试延迟
 )
 
 // 下载状态跟踪
 type downloadState struct {{
-	totalSize    int64
-	downloaded   int64
-	mutex        sync.Mutex
-	lastPrintTime time.Time
+	totalSize      int64
+	downloaded     int64
+	mutex          sync.Mutex
+	lastPrintTime  time.Time
+	completedChunks map[int64]bool // 已完成的块索引
 }}
 
 // 打印整体下载进度
@@ -73,74 +76,128 @@ func (s *downloadState) printProgress() {{
 	}}
 }}
 
-// 下载单个块
+// 下载单个块（带重试机制）
 func downloadChunk(url string, dest string, start, end int64, state *downloadState, wg *sync.WaitGroup) error {{
 	defer wg.Done()
 	
-	// 创建块文件
-	chunkFile, err := os.Create(fmt.Sprintf("%s.part%d", dest, start))
+	// 检查该块是否已完成
+	state.mutex.Lock()
+	if state.completedChunks[start] {{
+		state.mutex.Unlock()
+		return nil
+	}}
+	state.mutex.Unlock()
+	
+	chunkFileName := fmt.Sprintf("%s.part%d", dest, start)
+	
+	// 检查是否有部分下载的块
+	var resumeStart int64 = start
+	if fi, err := os.Stat(chunkFileName); err == nil {{
+		// 如果文件存在且大小大于0，尝试续传
+		if fi.Size() > 0 {{
+			resumeStart = start + fi.Size()
+			// 如果已经下载完成，标记为已完成并返回
+			if resumeStart > end {{
+				state.mutex.Lock()
+				state.completedChunks[start] = true
+				state.downloaded += (end - start + 1)
+				state.mutex.Unlock()
+				return nil
+			}}
+			fmt.Printf("继续下载块 %d (从 %d 到 %d)\\n", start/chunkSize+1, resumeStart, end)
+		}}
+	}}
+	
+	// 创建块文件（追加模式）
+	flags := os.O_WRONLY | os.O_CREATE
+	if resumeStart > start {{
+		flags |= os.O_APPEND
+	}} else {{
+		flags |= os.O_TRUNC
+	}}
+	
+	chunkFile, err := os.OpenFile(chunkFileName, flags, 0644)
 	if err != nil {{
 		return err
 	}}
 	defer chunkFile.Close()
 	
-	// 创建带范围的请求
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {{
-		return err
-	}}
-	
-	// 设置范围头
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
-	
-	// 发送请求
-	client := &http.Client{{}}
-	resp, err := client.Do(req)
-	if err != nil {{
-		return err
-	}}
-	defer resp.Body.Close()
-	
-	// 检查响应状态
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {{
-		return fmt.Errorf("下载块失败: %s", resp.Status)
-	}}
-	
-	// 读取并写入块数据
-	buffer := make([]byte, 4096)
-	var downloaded int64
-	
-	for {{
-		n, err := resp.Body.Read(buffer)
-		if n > 0 {{
-			if _, writeErr := chunkFile.Write(buffer[:n]); writeErr != nil {{
-				return writeErr
-			}}
-			
-			downloaded += int64(n)
-			
-			// 更新整体进度
-			state.mutex.Lock()
-			state.downloaded += int64(n)
-			state.mutex.Unlock()
-			
-			// 打印进度
-			state.printProgress()
+	// 重试机制
+	for retry := 0; retry < maxRetries; retry++ {{
+		if retry > 0 {{
+			fmt.Printf("重试下载块 %d (第 %d 次重试)\\n", start/chunkSize+1, retry)
+			time.Sleep(retryDelay)
 		}}
 		
+		// 创建带范围的请求
+		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {{
-			if err == io.EOF {{
+			return err
+		}}
+		
+		// 设置范围头
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", resumeStart, end))
+		
+		// 发送请求
+		client := &http.Client{{
+			Timeout: 5 * time.Minute, // 设置超时时间
+		}}
+		resp, err := client.Do(req)
+		if err != nil {{
+			fmt.Printf("块 %d 下载失败: %v\\n", start/chunkSize+1, err)
+			continue
+		}}
+		
+		// 检查响应状态
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {{
+			resp.Body.Close()
+			fmt.Printf("块 %d 下载失败: %s\\n", start/chunkSize+1, resp.Status)
+			continue
+		}}
+		
+		// 读取并写入块数据
+		buffer := make([]byte, 4096)
+		var chunkDownloaded int64
+		
+		for {{
+			n, err := resp.Body.Read(buffer)
+			if n > 0 {{
+				if _, writeErr := chunkFile.Write(buffer[:n]); writeErr != nil {{
+					resp.Body.Close()
+					return writeErr
+				}}
+				
+				chunkDownloaded += int64(n)
+				
+				// 更新整体进度
+				state.mutex.Lock()
+				state.downloaded += int64(n)
+				state.mutex.Unlock()
+				
+				// 打印进度
+				state.printProgress()
+			}}
+			
+			if err != nil {{
+				resp.Body.Close()
+				if err == io.EOF {{
+					// 块下载完成
+					state.mutex.Lock()
+					state.completedChunks[start] = true
+					state.mutex.Unlock()
+					return nil
+				}}
+				fmt.Printf("块 %d 读取失败: %v\\n", start/chunkSize+1, err)
 				break
 			}}
-			return err
 		}}
 	}}
 	
-	return nil
+	return fmt.Errorf("块 %d 达到最大重试次数", start/chunkSize+1)
 }}
 
-// 多线程分块下载文件
-func multiThreadDownload(url string, dest string, numThreads int) error {{
+// 多线程分块下载文件（每个块一个线程）
+func multiThreadDownload(url string, dest string) error {{
 	// 先发送HEAD请求获取文件大小
 	resp, err := http.Head(url)
 	if err != nil {{
@@ -156,29 +213,53 @@ func multiThreadDownload(url string, dest string, numThreads int) error {{
 	
 	// 计算需要的块数
 	numChunks := (totalSize + chunkSize - 1) / chunkSize
-	
-	// 如果块数小于线程数，调整线程数
-	if numChunks < int64(numThreads) {{
-		numThreads = int(numChunks)
-	}}
-	
-	fmt.Printf("文件大小: %.2fMB，将分为 %d 块，使用 %d 线程下载\\n", 
-		float64(totalSize)/1024/1024, numChunks, numThreads)
+	fmt.Printf("文件大小: %.2fMB，将分为 %d 块，每块一个线程\\n", 
+		float64(totalSize)/1024/1024, numChunks)
 	
 	// 初始化下载状态
 	state := &downloadState{{
-		totalSize:    totalSize,
-		downloaded:   0,
-		lastPrintTime: time.Now(),
+		totalSize:      totalSize,
+		downloaded:     0,
+		lastPrintTime:  time.Now(),
+		completedChunks: make(map[int64]bool),
+	}}
+	
+	// 检查已下载的块并计算已下载大小
+	for i := int64(0); i < numChunks; i++ {{
+		start := i * chunkSize
+		end := start + chunkSize - 1
+		if end >= totalSize {{
+			end = totalSize - 1
+		}}
+		
+		chunkFileName := fmt.Sprintf("%s.part%d", dest, start)
+		if fi, err := os.Stat(chunkFileName); err == nil {{
+			// 检查文件大小是否匹配块大小
+			if fi.Size() == end - start + 1 {{
+				state.completedChunks[start] = true
+				state.downloaded += fi.Size()
+			}}
+		}}
+	}}
+	
+	// 如果已经全部下载完成，直接返回
+	if state.downloaded == totalSize {{
+		fmt.Println("文件已完全下载，无需重复下载")
+		return nil
+	}}
+	
+	// 显示已下载进度
+	if state.downloaded > 0 {{
+		fmt.Printf("发现部分下载，已完成 %.1f%%\\n", 
+			float64(state.downloaded)/float64(totalSize)*100)
 	}}
 	
 	// 等待组，用于等待所有线程完成
 	var wg sync.WaitGroup
 	
-	// 启动多个线程下载不同的块
-	for i := 0; i < numThreads; i++ {{
-		chunkIndex := int64(i)
-		start := chunkIndex * chunkSize
+	// 为每个块启动一个线程
+	for i := int64(0); i < numChunks; i++ {{
+		start := i * chunkSize
 		end := start + chunkSize - 1
 		
 		// 最后一块可能小于chunkSize
@@ -186,15 +267,18 @@ func multiThreadDownload(url string, dest string, numThreads int) error {{
 			end = totalSize - 1
 		}}
 		
-		// 如果已经超出范围，退出循环
-		if start >= totalSize {{
-			break
+		// 如果已经完成，跳过
+		state.mutex.Lock()
+		if state.completedChunks[start] {{
+			state.mutex.Unlock()
+			continue
 		}}
+		state.mutex.Unlock()
 		
 		wg.Add(1)
 		go downloadChunk(url, dest, start, end, state, &wg)
 		
-		// 简单的延迟避免同时发起太多连接
+		// 添加延迟避免瞬间创建过多连接
 		time.Sleep(100 * time.Millisecond)
 	}}
 	
@@ -239,7 +323,7 @@ func multiThreadDownload(url string, dest string, numThreads int) error {{
 	return nil
 }}
 
-// 解压文件（保持不变）
+// 解压文件
 func unzipFile(zipPath, dest string) error {{
 	// 打开压缩包
 	r, err := zip.OpenReader(zipPath)
@@ -324,9 +408,9 @@ func main() {{
 		return
 	}}
 
-	// 下载文件（使用4个线程）
+	// 下载文件（每个块一个线程）
 	fmt.Println("开始下载文件...")
-	if err := multiThreadDownload(url, zipPath, 4); err != nil {{
+	if err := multiThreadDownload(url, zipPath); err != nil {{
 		fmt.Printf("下载文件失败: %v\\n", err)
 		return
 	}}
