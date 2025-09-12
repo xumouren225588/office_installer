@@ -212,7 +212,7 @@ func main() {{
 
 	// 使用aria2c以8线程下载目标文件
 	fmt.Println("开始使用aria2c多线程下载目标文件...")
-	cmd := exec.Command(aria2cPath, "-x", "8", "-d", tempDir, "-o", zipPath2, targetURL)
+	cmd := exec.Command(aria2cPath, "--max-tries=5", "--retry-wait=10", "-x", "8", "-d", tempDir, "-o", zipPath2, targetURL)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {{
@@ -265,4 +265,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     url2=args.url
     main(url2)
+
 
