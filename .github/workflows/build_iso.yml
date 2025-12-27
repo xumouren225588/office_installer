@@ -71,6 +71,7 @@ jobs:
         run: |
           echo "TIMESTP=$(date +"%Y%m%d%H%M%S")" >> $GITHUB_ENV
           mkisofs -J -R -l -allow-limited-size -o Office_${{ env.TIMESTP }}.iso ./data
+          ls
       - name: Upload ISO
         id: upload-iso  # 定义ID用于后续获取工件信息
         uses: actions/upload-artifact@v4
