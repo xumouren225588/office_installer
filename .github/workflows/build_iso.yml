@@ -1,4 +1,4 @@
-name: Build Office Installer
+name: Build Office Installer ISO
 
 on:
   issues:
@@ -39,7 +39,7 @@ jobs:
           cd pack
           .\setup.exe /download config.xml
           mkdir tool
-          move .\setup.exe tool\setup.exe
+          move .\setup.exe tools\setup.exe
       - name: build Setup
         shell: cmd
         run: |
