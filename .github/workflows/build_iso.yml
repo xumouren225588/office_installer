@@ -34,6 +34,7 @@ jobs:
         shell: cmd
         run: |
           mkdir pack
+          copy .\autorun.inf pack\
           copy .\setup.exe pack\
           copy .\config.xml pack\
           cd pack
@@ -69,7 +70,7 @@ jobs:
       - name: Build ISO
         run: |
           echo "TIMESTP=$(date +"%Y%m%d%H%M%S")" >> $GITHUB_ENV
-          mkisofs -a -l -J -L -r -o Office_$TIMESTP.iso ./data
+          mkisofs -J -R -o Office_$TIMESTP.iso ./data
       - name: Upload ISO
         id: upload-iso  # 定义ID用于后续获取工件信息
         uses: actions/upload-artifact@v4
