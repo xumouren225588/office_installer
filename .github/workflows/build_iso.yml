@@ -44,7 +44,7 @@ jobs:
         shell: cmd
         run: |
           pip install pyinstaller
-          pyinstaller -f --uac-admin main.py
+          pyinstaller -F --uac-admin main.py
           move dist\main.exe pack\setup.exe
       - name: Upload package
         id: upload-zip  # 定义ID用于后续获取工件信息
