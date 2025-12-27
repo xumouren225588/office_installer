@@ -70,7 +70,7 @@ jobs:
       - name: Build ISO
         run: |
           echo "TIMESTP=$(date +"%Y%m%d%H%M%S")" >> $GITHUB_ENV
-          mkisofs -J -R -o Office_$TIMESTP.iso ./data
+          mkisofs -J -R -l -allow-limited-size -o Office_${{ env.TIMESTP }}.iso ./data
       - name: Upload ISO
         id: upload-iso  # 定义ID用于后续获取工件信息
         uses: actions/upload-artifact@v4
@@ -91,7 +91,7 @@ jobs:
           NIGHTLY_LINK="nightly.link/${GITHUB_USER}/${GITHUB_REPO}/actions/artifacts/${ARTIFACT_ID}.zip"
       
           # 拼出最终文件名
-          FILE_NAME="Office_${{ env.TIMESTP }}"
+          FILE_NAME="Office_${{ env.TIMESTP }}.zip"
       
           curl -X POST "https://open-api.123pan.com/api/v1/offline/download" \
             -H "Authorization: Bearer ${API_TOKEN}" \
