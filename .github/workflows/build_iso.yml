@@ -1,0 +1,117 @@
+name: Build Office Installer
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  build:
+    if: startsWith(github.event.issue.title, 'isobuild')
+    runs-on: windows-latest
+
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v6.0.0
+        with:
+          python-version: 3.10.5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Write config.xml from issue body
+        shell: pwsh
+        run: |
+          $body = @"
+          ${{ github.event.issue.body }}
+          "@
+          $body | Out-File -FilePath "${{ github.workspace }}\config.xml" -Encoding utf8NoBOM
+
+      - name: Download 7zr
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://www.7-zip.org/a/7zr.exe" -OutFile ".\7zr.exe"
+
+      - name: Download Office
+        shell: cmd
+        run: |
+          mkdir pack
+          copy .\setup.exe pack\
+          copy .\config.xml pack\
+          cd pack
+          .\setup.exe /download config.xml
+          mkdir tool
+          move .\setup.exe tool\setup.exe
+      - name: build Setup
+        shell: cmd
+        run: |
+          pip install pyinstaller
+          pyinstaller -f --uac-admin main.py
+          move dist\main.exe pack\setup.exe
+      - name: Upload package
+        id: upload-zip  # 定义ID用于后续获取工件信息
+        uses: actions/upload-artifact@v4
+        with:
+          name: pack
+          path: pack\*
+          retention-days: 1
+      
+
+  build_iso:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dep
+        run: apt-get update && apt-get install mkisofs -y
+      - name: Download package
+        uses: actions/download-artifact@v7.0.0
+        with:
+          name: pack
+          path: data
+      - name: Build ISO
+        run: |
+          echo "TIMESTP=$(date +"%Y%m%d%H%M%S")" >> $GITHUB_ENV
+          mkisofs -a -l -J -L -r -o Office_$TIMESTP.iso ./data
+      - name: Upload ISO
+        id: upload-iso  # 定义ID用于后续获取工件信息
+        uses: actions/upload-artifact@v4
+        with:
+          name: Office
+          path: Office_${{ env.TIMESTP }}.iso
+          retention-days: 1
+      - name: Generate nightly.link and create download task
+        shell: bash
+        env:
+          API_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+          ARTIFACT_ID: ${{ steps.upload-iso.outputs.artifact-id }}
+          GITHUB_USER: xumouren225588
+          GITHUB_REPO: office_installer
+          FOLDER_ID: 19960178
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        run: |
+          NIGHTLY_LINK="nightly.link/${GITHUB_USER}/${GITHUB_REPO}/actions/artifacts/${ARTIFACT_ID}.zip"
+      
+          # 拼出最终文件名
+          FILE_NAME="Office_${{ env.TIMESTP }}"
+      
+          curl -X POST "https://open-api.123pan.com/api/v1/offline/download" \
+            -H "Authorization: Bearer ${API_TOKEN}" \
+            -H "Platform: open_platform" \
+            -H "Content-Type: application/json" \
+            --data "{\"url\":\"https://jiashu.1win.eu.org/https://${NIGHTLY_LINK}\", \"dirID\": ${FOLDER_ID}, \"fileName\":\"${FILE_NAME}\"}"
+      - name: Close issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '打包完成！ISO镜像：https://jiashu.1win.eu.org/https://nightly.link/xumouren225588/office_installer/actions/artifacts/${{ steps.upload-iso.outputs.artifact-id }}.zip'
+            });
+
+    
+    
