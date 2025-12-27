@@ -38,7 +38,7 @@ jobs:
           copy .\config.xml pack\
           cd pack
           .\setup.exe /download config.xml
-          mkdir tool
+          mkdir tools
           move .\setup.exe tools\setup.exe
       - name: build Setup
         shell: cmd
