@@ -44,7 +44,7 @@ jobs:
         shell: cmd
         run: |
           pip install pyinstaller
-          pyinstaller -F --uac-admin main.py
+          pyinstaller -F -w --uac-admin main.py
           move dist\main.exe pack\setup.exe
       - name: Upload package
         id: upload-zip  # 定义ID用于后续获取工件信息
@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install dep
-        run: apt-get update && apt-get install mkisofs -y
+        run: sudo apt-get update && sudo apt-get install mkisofs -y
       - name: Download package
         uses: actions/download-artifact@v7.0.0
         with:
