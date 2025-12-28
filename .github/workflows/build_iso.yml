@@ -97,7 +97,7 @@ jobs:
             -H "Authorization: Bearer ${API_TOKEN}" \
             -H "Platform: open_platform" \
             -H "Content-Type: application/json" \
-            --data "{\"url\":\"https://jiashu.1win.eu.org/https://${NIGHTLY_LINK}\", \"dirID\": ${FOLDER_ID}, \"fileName\":\"${FILE_NAME}\"}"
+            --data "{\"url\":\"https://j.1win.ip-ddns.com/https://${NIGHTLY_LINK}\", \"dirID\": ${FOLDER_ID}, \"fileName\":\"${FILE_NAME}\"}"
       - name: Close issue
         uses: actions/github-script@v7
         with:
@@ -112,7 +112,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: '打包完成！ISO镜像：https://jiashu.1win.eu.org/https://nightly.link/xumouren225588/office_installer/actions/artifacts/${{ steps.upload-iso.outputs.artifact-id }}.zip'
+              body: '打包完成！ISO镜像：https://j.1win.ip-ddns.com/https://nightly.link/xumouren225588/office_installer/actions/artifacts/${{ steps.upload-iso.outputs.artifact-id }}.zip'
             });
 
     
